@@ -9,37 +9,90 @@
   <body>
     <main class="app">
       <header class="header">
-        <div>
-          <p class="eyebrow">CBOR Serial Monitor</p>
+        <div class="header-content">
+          <p class="eyebrow">Trackside Telemetry</p>
           <h1>DCC Speed Tools</h1>
           <p class="subtitle">
             Live transit measurements with error bands from the serial stream.
           </p>
-          <a class="link-button" href="{{ url_for('settings') }}">Settings</a>
         </div>
-        <div class="meta">
-          <div>
-            <span class="meta-label">Serial</span>
-            <span class="meta-value">{{ serial_port or 'Not detected' }}</span>
-          </div>
-          <div>
-            <span class="meta-label">Baud</span>
-            <span class="meta-value">{{ baud }}</span>
-          </div>
-          <div>
-            <span class="meta-label">Version</span>
-            <span class="meta-value" id="version-value">{{ version or 'Pending' }}</span>
+        <div class="header-side">
+          <a class="link-button settings-button" href="{{ url_for('settings') }}">Settings</a>
+          <div class="meta">
+            <div>
+              <span class="meta-label">Serial</span>
+              <span class="meta-value">{{ serial_port or 'Not detected' }}</span>
+            </div>
+            <div>
+              <span class="meta-label">Baud</span>
+              <span class="meta-value">{{ baud }}</span>
+            </div>
+            <div>
+              <span class="meta-label">Version</span>
+              <span class="meta-value" id="version-value">{{ version or 'Pending' }}</span>
+            </div>
           </div>
         </div>
       </header>
+
+      <section class="panel live-status">
+        <div class="panel-header">
+          <div>
+            <h2>Live Status</h2>
+            <p class="panel-subtitle">
+              Real-time sensor state, direction, and the last speed band.
+            </p>
+          </div>
+          <div class="status" id="live-status-summary">Waiting for sensor data...</div>
+        </div>
+        <div class="status-grid">
+          <div class="sensor-diagram">
+            <svg class="sensor-svg" viewBox="0 0 280 100" role="img" aria-label="Sensor state">
+              <g class="track">
+                <rect x="20" y="44" width="240" height="12" rx="6"></rect>
+              </g>
+              <circle id="sensor-1-light" class="sensor-light" cx="50" cy="50" r="18"></circle>
+              <circle id="sensor-2-light" class="sensor-light" cx="230" cy="50" r="18"></circle>
+              <g id="direction-arrow" class="direction-arrow">
+                <path d="M80 50 H200"></path>
+                <path d="M200 50 L188 40"></path>
+                <path d="M200 50 L188 60"></path>
+              </g>
+            </svg>
+            <div class="sensor-labels">
+              <span>Sensor 0</span>
+              <span>Sensor 1</span>
+            </div>
+          </div>
+          <div class="status-details">
+            <div class="detail">
+              <span class="meta-label">Sensor 0</span>
+              <span class="detail-value" id="sensor-1-state">--</span>
+            </div>
+            <div class="detail">
+              <span class="meta-label">Sensor 1</span>
+              <span class="detail-value" id="sensor-2-state">--</span>
+            </div>
+            <div class="detail">
+              <span class="meta-label">State</span>
+              <span class="detail-value" id="sensor-state-label">--</span>
+            </div>
+            <div class="detail">
+              <span class="meta-label">Expected</span>
+              <span class="detail-value" id="expected-direction">--</span>
+            </div>
+            <div class="detail reading hidden" id="speed-band-wrap">
+              <span class="meta-label">Last Reading</span>
+              <span class="detail-value" id="speed-band">--</span>
+            </div>
+          </div>
+        </div>
+      </section>
 
       <section class="panel">
         <div class="panel-header">
           <div>
             <h2>Recent Measurements</h2>
-            <p class="panel-subtitle">
-              Showing the 10 most recent transit packets (type "transit").
-            </p>
           </div>
           <div class="status" id="status">Waiting for data...</div>
         </div>
@@ -64,20 +117,22 @@
           </table>
         </div>
       </section>
-
-      <section class="panel hint">
-        <h3>Protocol Notes</h3>
-        <p>
-          Speed is shown in MPH with a typical error estimate. The error band is
-          shown as MPH +/- err.
-        </p>
-      </section>
     </main>
 
     <script>
       const body = document.getElementById("measurements-body");
       const status = document.getElementById("status");
       const versionValue = document.getElementById("version-value");
+      const liveStatusSummary = document.getElementById("live-status-summary");
+      const sensorStateLabel = document.getElementById("sensor-state-label");
+      const expectedDirection = document.getElementById("expected-direction");
+      const sensor1State = document.getElementById("sensor-1-state");
+      const sensor2State = document.getElementById("sensor-2-state");
+      const speedBandWrap = document.getElementById("speed-band-wrap");
+      const speedBand = document.getElementById("speed-band");
+      const sensor1Light = document.getElementById("sensor-1-light");
+      const sensor2Light = document.getElementById("sensor-2-light");
+      const directionArrow = document.getElementById("direction-arrow");
       const numberFormat = new Intl.NumberFormat(undefined, {
         maximumFractionDigits: 3,
       });
@@ -109,6 +164,13 @@
           return "-";
         }
         return `${formatNumber(value)} MPH`;
+      }
+
+      function formatBandValue(low, high) {
+        if (low === null || high === null || low === undefined || high === undefined) {
+          return "-";
+        }
+        return `${formatNumber(low)} to ${formatNumber(high)} MPH`;
       }
 
       function formatMs(value) {
@@ -155,8 +217,124 @@
           return;
         }
 
-        status.textContent = `Showing ${measurements.length} most recent transits.`;
+        status.textContent = `Showing ${measurements.length} most recent passes.`;
         body.innerHTML = measurements.map(rowHtml).join("");
+      }
+
+      function setLiveStatusSummary(message, tone) {
+        if (!liveStatusSummary) {
+          return;
+        }
+        liveStatusSummary.textContent = message;
+        if (tone) {
+          liveStatusSummary.dataset.tone = tone;
+        } else {
+          liveStatusSummary.removeAttribute("data-tone");
+        }
+      }
+
+      function describeSensor(active) {
+        if (active === true) {
+          return "Blocked";
+        }
+        if (active === false) {
+          return "Clear";
+        }
+        return "Unknown";
+      }
+
+      function setLightState(light, active) {
+        if (!light) {
+          return;
+        }
+        light.classList.toggle("active", active === true);
+        light.classList.toggle("inactive", active === false);
+        light.classList.toggle("unknown", active !== true && active !== false);
+      }
+
+      function resolveExpectedDirection(state) {
+        if (state.expected_direction) {
+          return state.expected_direction;
+        }
+        if (state.expected_sensor === 1) {
+          return "0->1";
+        }
+        if (state.expected_sensor === 0) {
+          return "1->0";
+        }
+        return null;
+      }
+
+      function updateArrow(state) {
+        if (!directionArrow) {
+          return;
+        }
+        const waiting =
+          state.waiting === true ||
+          (state.state && state.state.toLowerCase().includes("wait"));
+        const direction = resolveExpectedDirection(state);
+        directionArrow.classList.toggle("active", Boolean(direction && waiting));
+        directionArrow.classList.toggle("reverse", direction === "1->0");
+      }
+
+      function updateSpeedBand(state) {
+        if (!speedBandWrap || !speedBand) {
+          return;
+        }
+        const measurement = state.last_measurement;
+        const finishing = state.finishing === true;
+        const hasBand = measurement && measurement.err_low !== null && measurement.err_high !== null;
+        if (!hasBand || !finishing) {
+          speedBandWrap.classList.add("hidden");
+          return;
+        }
+
+        speedBand.textContent = formatBandValue(
+          measurement.err_low,
+          measurement.err_high
+        );
+        speedBand.classList.toggle("ok", measurement.ok === true);
+        speedBand.classList.toggle("bad", measurement.ok === false);
+        speedBandWrap.classList.remove("hidden");
+      }
+
+      function renderState(state) {
+        if (!state) {
+          setLiveStatusSummary("Waiting for sensor data...");
+          return;
+        }
+        const derivedState = state.state || "Awaiting sensor state";
+        setLiveStatusSummary(derivedState);
+
+        if (sensorStateLabel) {
+          sensorStateLabel.textContent = derivedState;
+        }
+        if (sensor1State) {
+          sensor1State.textContent = describeSensor(state.sensor_1_active);
+        }
+        if (sensor2State) {
+          sensor2State.textContent = describeSensor(state.sensor_2_active);
+        }
+        if (expectedDirection) {
+          const direction = resolveExpectedDirection(state);
+          const waiting =
+            state.waiting === true ||
+            (state.state && state.state.toLowerCase().includes("wait"));
+          if (!waiting || !direction) {
+            expectedDirection.textContent = "--";
+          } else if (direction === "0->1") {
+            expectedDirection.textContent = "Sensor 1";
+          } else if (direction === "1->0") {
+            expectedDirection.textContent = "Sensor 0";
+          } else {
+            expectedDirection.textContent = "--";
+          }
+        }
+
+        setLightState(sensor1Light, state.sensor_1_active);
+        setLightState(sensor2Light, state.sensor_2_active);
+        updateArrow(state);
+        updateSpeedBand(state);
       }
 
       async function fetchMeasurements() {
@@ -175,8 +353,26 @@
         }
       }
 
-      fetchMeasurements();
-      setInterval(fetchMeasurements, 1500);
+      async function fetchState() {
+        try {
+          const response = await fetch("/api/state");
+          if (!response.ok) {
+            throw new Error("Bad response");
+          }
+          const payload = await response.json();
+          renderState(payload);
+        } catch (err) {
+          setLiveStatusSummary("Sensor status unavailable", "warn");
+        }
+      }
+
+      function poll() {
+        fetchMeasurements();
+        fetchState();
+      }
+
+      poll();
+      setInterval(poll, 1500);
     </script>
   </body>
 </html>
