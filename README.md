@@ -7,7 +7,7 @@ recent measurements over a Flask web UI and JSON API.
 
 - Python 3.9+
 - Serial device emitting the protocol described in
-  `~/CLionProjects/DccSpeedTools/protocol.md`
+  [DccSpeedTools](https://github.com/jrddunbr/DccSpeedTools/blob/main/protocol.md)
 
 ## Setup
 
