@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>DCC Speed Tools - Settings</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  </head>
+  <body>
+    <main class="app">
+      <header class="header">
+        <div>
+          <p class="eyebrow">Device Configuration</p>
+          <h1>DCC Speed Tools</h1>
+          <p class="subtitle">
+            Configure sensor spacing, look distance (mm), and timeout (seconds).
+          </p>
+          <a class="link-button" href="{{ url_for('index') }}">Back to Live View</a>
+        </div>
+        <div class="meta">
+          <div>
+            <span class="meta-label">Serial</span>
+            <span class="meta-value">{{ serial_port or 'Not detected' }}</span>
+          </div>
+          <div>
+            <span class="meta-label">Baud</span>
+            <span class="meta-value">{{ baud }}</span>
+          </div>
+          <div>
+            <span class="meta-label">Version</span>
+            <span class="meta-value">{{ version or 'Pending' }}</span>
+          </div>
+        </div>
+      </header>
+
+      <section class="panel">
+        <div class="panel-header">
+          <div>
+            <h2>Sensor Settings</h2>
+            <p class="panel-subtitle">Leave a field blank to keep the current device value.</p>
+          </div>
+          <div class="status" id="config-status">Ready</div>
+        </div>
+
+        <form id="config-form" class="form-grid">
+          <label class="form-field">
+            <span>Sensor spacing (mm)</span>
+            <input id="distance-mm" type="number" min="1" step="1" placeholder="e.g. 260">
+          </label>
+          <label class="form-field">
+            <span>Look distance (mm)</span>
+            <input id="look-mm" type="number" min="1" step="1" placeholder="e.g. 150">
+          </label>
+          <label class="form-field">
+            <span>Timeout (seconds)</span>
+            <input id="timeout-s" type="number" min="1" step="1" placeholder="e.g. 5">
+          </label>
+          <div class="form-actions">
+            <button type="submit" class="primary-button">Apply</button>
+          </div>
+        </form>
+      </section>
+    </main>
+
+    <script>
+      const form = document.getElementById("config-form");
+      const status = document.getElementById("config-status");
+      const distanceInput = document.getElementById("distance-mm");
+      const lookInput = document.getElementById("look-mm");
+      const timeoutInput = document.getElementById("timeout-s");
+      let refreshAttempts = 0;
+      const maxRefreshAttempts = 6;
+
+      function readValue(input) {
+        const trimmed = input.value.trim();
+        if (!trimmed) {
+          return null;
+        }
+        const value = Number(trimmed);
+        if (!Number.isFinite(value) || value <= 0) {
+          return null;
+        }
+        return Math.round(value);
+      }
+
+      function setStatus(message, tone) {
+        status.textContent = message;
+        status.dataset.tone = tone || "neutral";
+      }
+
+      function populateConfig(payload) {
+        if (payload.distance_mm !== null && payload.distance_mm !== undefined) {
+          distanceInput.value = payload.distance_mm;
+        }
+        if (payload.look_mm !== null && payload.look_mm !== undefined) {
+          lookInput.value = payload.look_mm;
+        }
+        if (payload.timeout_s !== null && payload.timeout_s !== undefined) {
+          timeoutInput.value = payload.timeout_s;
+        }
+      }
+
+      async function fetchConfig(refresh) {
+        try {
+          const url = refresh ? "/api/config?refresh=1" : "/api/config";
+          const response = await fetch(url);
+          if (!response.ok) {
+            throw new Error("Bad response");
+          }
+          const payload = await response.json();
+          populateConfig(payload);
+          const hasValues =
+            (payload.distance_mm !== null && payload.distance_mm !== undefined) ||
+            (payload.look_mm !== null && payload.look_mm !== undefined) ||
+            (payload.timeout_s !== null && payload.timeout_s !== undefined);
+          if (!hasValues && refreshAttempts < maxRefreshAttempts) {
+            refreshAttempts += 1;
+            setStatus("Waiting for device config...", "neutral");
+            setTimeout(() => fetchConfig(false), 1000);
+            return;
+          }
+          if (hasValues) {
+            setStatus("Config loaded.", "ok");
+          } else {
+            setStatus("No config received.", "warn");
+          }
+        } catch (err) {
+          setStatus("Failed to load config.", "warn");
+        }
+      }
+
+      setStatus("Fetching config...", "neutral");
+      fetchConfig(true);
+
+      form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const distance = readValue(distanceInput);
+        const look = readValue(lookInput);
+        const timeout = readValue(timeoutInput);
+
+        if (distance === null && look === null && timeout === null) {
+          setStatus("Enter at least one value.", "warn");
+          return;
+        }
+
+        setStatus("Sending...", "neutral");
+        try {
+          const response = await fetch("/api/config", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              distance_mm: distance,
+              look_mm: look,
+              timeout_s: timeout,
+            }),
+          });
+          const payload = await response.json();
+          if (!response.ok || !payload.ok) {
+            throw new Error(payload.error || "Config rejected");
+          }
+          setStatus("Config applied.", "ok");
+          if (distance !== null) {
+            distanceInput.value = "";
+          }
+          if (look !== null) {
+            lookInput.value = "";
+          }
+          if (timeout !== null) {
+            timeoutInput.value = "";
+          }
+        } catch (err) {
+          setStatus("Failed to apply config.", "warn");
+        }
+      });
+    </script>
+  </body>
+</html>

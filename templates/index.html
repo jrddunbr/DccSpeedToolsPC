@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>DCC Speed Tools - Live Measurements</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  </head>
+  <body>
+    <main class="app">
+      <header class="header">
+        <div>
+          <p class="eyebrow">CBOR Serial Monitor</p>
+          <h1>DCC Speed Tools</h1>
+          <p class="subtitle">
+            Live transit measurements with error bands from the serial stream.
+          </p>
+          <a class="link-button" href="{{ url_for('settings') }}">Settings</a>
+        </div>
+        <div class="meta">
+          <div>
+            <span class="meta-label">Serial</span>
+            <span class="meta-value">{{ serial_port or 'Not detected' }}</span>
+          </div>
+          <div>
+            <span class="meta-label">Baud</span>
+            <span class="meta-value">{{ baud }}</span>
+          </div>
+          <div>
+            <span class="meta-label">Version</span>
+            <span class="meta-value" id="version-value">{{ version or 'Pending' }}</span>
+          </div>
+        </div>
+      </header>
+
+      <section class="panel">
+        <div class="panel-header">
+          <div>
+            <h2>Recent Measurements</h2>
+            <p class="panel-subtitle">
+              Showing the 10 most recent transit packets (type "transit").
+            </p>
+          </div>
+          <div class="status" id="status">Waiting for data...</div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Received</th>
+                <th>Speed</th>
+                <th>Error</th>
+                <th>Error Band</th>
+                <th>OK</th>
+                <th>Sensors</th>
+                <th>Delta Time</th>
+              </tr>
+            </thead>
+            <tbody id="measurements-body">
+              <tr>
+                <td colspan="7" class="empty">No measurements yet.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel hint">
+        <h3>Protocol Notes</h3>
+        <p>
+          Speed is shown in MPH with a typical error estimate. The error band is
+          shown as MPH +/- err.
+        </p>
+      </section>
+    </main>
+
+    <script>
+      const body = document.getElementById("measurements-body");
+      const status = document.getElementById("status");
+      const versionValue = document.getElementById("version-value");
+      const numberFormat = new Intl.NumberFormat(undefined, {
+        maximumFractionDigits: 3,
+      });
+
+      function formatNumber(value) {
+        if (value === null || value === undefined) {
+          return "-";
+        }
+        return numberFormat.format(value);
+      }
+
+      function formatBand(low, high, unit) {
+        if (low === null || high === null || low === undefined || high === undefined) {
+          return "-";
+        }
+        const suffix = unit ? ` ${unit}` : "";
+        return `${formatNumber(low)}${suffix} to ${formatNumber(high)}${suffix}`;
+      }
+
+      function formatPercent(value) {
+        if (value === null || value === undefined) {
+          return "-";
+        }
+        return `${formatNumber(value)}%`;
+      }
+
+      function formatSpeed(value) {
+        if (value === null || value === undefined) {
+          return "-";
+        }
+        return `${formatNumber(value)} MPH`;
+      }
+
+      function formatMs(value) {
+        if (value === null || value === undefined) {
+          return "-";
+        }
+        const ms = value / 1000;
+        return `${ms.toFixed(3)} ms`;
+      }
+
+      function formatSensors(start, end) {
+        if (start === null || end === null || start === undefined || end === undefined) {
+          return "-";
+        }
+        return `${start} -> ${end}`;
+      }
+
+      function rowHtml(measurement) {
+        const okValue = measurement.ok;
+        const okLabel = okValue === null || okValue === undefined
+          ? "-"
+          : (okValue ? "OK" : "Out");
+        const okClass = okValue === null || okValue === undefined
+          ? "neutral"
+          : (okValue ? "ok" : "bad");
+
+        return `
+          <tr>
+            <td>${measurement.received_iso || "-"}</td>
+            <td>${formatSpeed(measurement.mph)}</td>
+            <td>${formatPercent(measurement.err)}</td>
+            <td>${formatBand(measurement.err_low, measurement.err_high, "MPH")}</td>
+            <td class="${okClass}">${okLabel}</td>
+            <td>${formatSensors(measurement.start_sensor, measurement.end_sensor)}</td>
+            <td>${formatMs(measurement.dt_us)}</td>
+          </tr>
+        `;
+      }
+
+      function render(measurements) {
+        if (!measurements || measurements.length === 0) {
+          status.textContent = "No measurements yet.";
+          body.innerHTML = '<tr><td colspan="7" class="empty">No measurements yet.</td></tr>';
+          return;
+        }
+
+        status.textContent = `Showing ${measurements.length} most recent transits.`;
+        body.innerHTML = measurements.map(rowHtml).join("");
+      }
+
+      async function fetchMeasurements() {
+        try {
+          const response = await fetch("/api/measurements");
+          if (!response.ok) {
+            throw new Error("Bad response");
+          }
+          const payload = await response.json();
+          render(payload.measurements);
+          if (versionValue) {
+            versionValue.textContent = payload.version || "Pending";
+          }
+        } catch (err) {
+          status.textContent = "Connection error";
+        }
+      }
+
+      fetchMeasurements();
+      setInterval(fetchMeasurements, 1500);
+    </script>
+  </body>
+</html>
